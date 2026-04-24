@@ -4,80 +4,70 @@ const app = express();
 
 app.use(cors());
 
-const DATA_BASE = 'https://data-api.polymarket.com';
+const BASE = 'https://data-api.polymarket.com/v1';
 
-// Health check
+// Health check — visit your Railway URL to confirm it's alive
 app.get('/', (req, res) => {
   res.json({ status: 'PolySharp proxy running', time: new Date().toISOString() });
 });
 
-// Leaderboard — tries multiple endpoint formats for compatibility
-// /leaderboard?window=7d&limit=50  (our frontend calls this)
+// Leaderboard
+// Called with: /leaderboard?window=7d&limit=50
+// Polymarket v1 API uses timePeriod=WEEK / MONTH / ALL
 app.get('/leaderboard', async (req, res) => {
   const { window: win, limit = 50 } = req.query;
 
-  // Map our window param to Polymarket's period param
-  const periodMap = { '7d': 'week', '30d': 'month', 'all': 'all', 'week': 'week', 'month': 'month' };
-  const period = periodMap[win] || 'week';
+  const periodMap = {
+    '7d':    'WEEK',
+    'week':  'WEEK',
+    '30d':   'MONTH',
+    'month': 'MONTH',
+    'all':   'ALL',
+  };
+  const timePeriod = periodMap[win] || 'WEEK';
 
-  // Try the primary endpoint format
-  const urls = [
-    `${DATA_BASE}/leaderboard?period=${period}&limit=${limit}&order-by=pnl`,
-    `${DATA_BASE}/leaderboard?window=${period}&limit=${limit}`,
-    `${DATA_BASE}/leaderboard?timewindow=${win}&limit=${limit}`,
-  ];
-
-  for (const url of urls) {
-    try {
-      const resp = await fetch(url, {
-        headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' }
-      });
-      if (resp.ok) {
-        const data = await resp.json();
-        // Normalize response — API may return array or { leaderboard: [] } or { data: [] }
-        const list = Array.isArray(data) ? data : (data.leaderboard || data.data || data.results || []);
-        if (list.length > 0) {
-          return res.json(list);
-        }
-      }
-    } catch (e) {
-      console.error('Leaderboard attempt failed:', url, e.message);
-    }
-  }
-
-  // All attempts failed — return empty with diagnostic info
-  res.status(200).json([]);
-});
-
-// Positions — /positions?user=0x...
-app.get('/positions', async (req, res) => {
   try {
-    const params = new URLSearchParams(req.query).toString();
-    const resp = await fetch(`${DATA_BASE}/positions?${params}`, {
+    const url = `${BASE}/leaderboard?timePeriod=${timePeriod}&limit=${limit}`;
+    console.log('Fetching leaderboard:', url);
+    const resp = await fetch(url, {
       headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' }
     });
-    if (resp.ok) {
-      const data = await resp.json();
-      return res.json(data);
-    }
-    res.status(resp.status).json({ error: `Upstream returned ${resp.status}` });
+    const data = await resp.json();
+    const list = Array.isArray(data) ? data : (data.leaderboard || data.data || []);
+    res.json(list);
   } catch (e) {
+    console.error('Leaderboard error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
 
-// Activity — /activity?user=0x...
+// Positions
+// Called with: /positions?user=0x...&sizeThreshold=1&limit=20
+app.get('/positions', async (req, res) => {
+  try {
+    const params = new URLSearchParams(req.query).toString();
+    const url = `https://data-api.polymarket.com/positions?${params}`;
+    console.log('Fetching positions:', url);
+    const resp = await fetch(url, {
+      headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' }
+    });
+    const data = await resp.json();
+    res.json(data);
+  } catch (e) {
+    console.error('Positions error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Activity
 app.get('/activity', async (req, res) => {
   try {
     const params = new URLSearchParams(req.query).toString();
-    const resp = await fetch(`${DATA_BASE}/activity?${params}`, {
+    const resp = await fetch(`https://data-api.polymarket.com/activity?${params}`, {
       headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' }
     });
-    if (resp.ok) {
-      const data = await resp.json();
-      return res.json(data);
-    }
-    res.status(resp.status).json({ error: `Upstream returned ${resp.status}` });
+    const data = await resp.json();
+    res.json(data);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
